@@ -1,0 +1,20 @@
+[package]
+name = "spacers"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "An example printCAD workbench package: round and hex spacers"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+printcad-bench-sdk = { git = "https://github.com/gilbertorconde/printCAD", branch = "master" }
+serde = { version = "1", features = ["derive"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
