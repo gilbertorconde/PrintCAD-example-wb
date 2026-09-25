@@ -1,7 +1,7 @@
 //! Spacers: an example printCAD workbench package.
 //!
-//! A spacer is a feature of its own kind: a round or hex prism with a bore
-//! through it. The package shows the parts of a workbench most packages
+//! A spacer is a feature of its own kind: a round, hex or square prism, or
+//! a round one with a flange at its base, with a bore through it. The package shows the parts of a workbench most packages
 //! need: tools that make features, a task panel whose numbers take
 //! formulas, a rebuild plan the kernel runs, drawing in the view, a command
 //! for scripts and agents, a tree menu entry and a settings page.
@@ -16,6 +16,8 @@ use serde::{Deserialize, Serialize};
 const KIND: &str = "example.spacers.spacer";
 const ROUND: &str = "example.spacers.round";
 const HEX: &str = "example.spacers.hex";
+const SQUARE: &str = "example.spacers.square";
+const FLANGED: &str = "example.spacers.flanged";
 const MAKE: &str = "example.spacers.make";
 const EDIT: &str = "example.spacers.edit";
 
@@ -24,16 +26,51 @@ const EDIT: &str = "example.spacers.edit";
 pub enum Shape {
     Round,
     Hex,
+    Square,
+    /// Round, with a wider collar at its base.
+    Flanged,
+}
+
+/// Every shape: its name in the panel, its icon, its tool and the tool's
+/// key, in the order the panel lists them.
+const SHAPES: [(Shape, &str, &str, &str, &str); 4] = [
+    (Shape::Round, "Round", "spacer", ROUND, "R"),
+    (Shape::Hex, "Hex", "spacer-hex", HEX, "H"),
+    (Shape::Square, "Square", "spacer-square", SQUARE, "S"),
+    (Shape::Flanged, "Flanged", "spacer-flanged", FLANGED, "F"),
+];
+
+impl Shape {
+    fn index(self) -> usize {
+        SHAPES.iter().position(|s| s.0 == self).unwrap_or(0)
+    }
+
+    fn icon(self) -> &'static str {
+        SHAPES[self.index()].2
+    }
+
+    fn named(name: &str) -> Option<Shape> {
+        SHAPES
+            .iter()
+            .find(|s| s.1.eq_ignore_ascii_case(name))
+            .map(|s| s.0)
+    }
 }
 
 /// A spacer's data. Lengths in millimetres.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Spacer {
     pub shape: Shape,
-    /// The diameter, or the width across flats of a hex.
+    /// The diameter, the width across flats of a hex, or a square's side.
     pub outer: f64,
     pub bore: f64,
     pub height: f64,
+    /// A flanged spacer's collar: its diameter and its thickness. A spacer
+    /// of another shape, or one saved before flanges were offered, reads 0.
+    #[serde(default)]
+    pub flange: f64,
+    #[serde(default)]
+    pub flange_height: f64,
 }
 
 impl Spacer {
@@ -57,16 +94,41 @@ impl Spacer {
         if self.bore > 0.0 && self.outer - self.bore < 0.8 {
             return Some("The wall around the bore is thinner than 0.4 mm.");
         }
+        if self.shape == Shape::Flanged {
+            if self.flange <= self.outer {
+                return Some("The flange must be wider than the spacer.");
+            }
+            if self.flange_height <= 0.0 || self.flange_height >= self.height {
+                return Some("The flange must be thinner than the spacer is tall.");
+            }
+        }
         None
+    }
+
+    /// A flange to go with an outside diameter.
+    fn fit_flange(&mut self) {
+        if self.flange <= self.outer {
+            self.flange = (self.outer * 1.5 * 100.0).round() / 100.0;
+        }
+        if self.flange_height <= 0.0 || self.flange_height >= self.height {
+            self.flange_height = (self.height / 4.0).clamp(0.4, 2.0);
+        }
     }
 
     /// The outside outline, on the XY plane about the origin.
     pub fn outline(&self) -> Vec<ProfileSegment> {
         match self.shape {
-            Shape::Round => vec![ProfileSegment::Circle {
-                center: [0.0, 0.0],
-                radius: self.outer / 2.0,
-            }],
+            Shape::Round | Shape::Flanged => vec![circle(self.outer)],
+            Shape::Square => {
+                let h = self.outer / 2.0;
+                let corners = [[-h, -h], [h, -h], [h, h], [-h, h]];
+                (0..4)
+                    .map(|i| ProfileSegment::Line {
+                        start: corners[i],
+                        end: corners[(i + 1) % 4],
+                    })
+                    .collect()
+            }
             Shape::Hex => {
                 // Across flats `outer`: the corners sit on a circle of
                 // radius outer / √3, flats square to X.
@@ -85,17 +147,32 @@ impl Spacer {
         }
     }
 
-    /// The kernel op that builds it.
-    pub fn op(&self, op: BooleanOp) -> SolidOp {
-        let mut wires = vec![ProfileWire {
-            segments: self.outline(),
-        }];
+    /// The kernel ops that build it: its body, and first its flange when it
+    /// has one. `first` starts the body's solid; later spacers fuse to it.
+    pub fn ops(&self, first: bool) -> Vec<SolidOp> {
+        let mut ops = Vec::new();
+        if self.shape == Shape::Flanged {
+            ops.push(self.prism(vec![circle(self.flange)], self.flange_height));
+        }
+        ops.push(self.prism(self.outline(), self.height));
+        for (i, op) in ops.iter_mut().enumerate() {
+            if let SolidOp::Sweep { op, .. } = op {
+                *op = if first && i == 0 {
+                    BooleanOp::NewSolid
+                } else {
+                    BooleanOp::Fuse
+                };
+            }
+        }
+        ops
+    }
+
+    /// `outline` with the bore through it, extruded `height` up.
+    fn prism(&self, outline: Vec<ProfileSegment>, height: f64) -> SolidOp {
+        let mut wires = vec![ProfileWire { segments: outline }];
         if self.bore > 0.0 {
             wires.push(ProfileWire {
-                segments: vec![ProfileSegment::Circle {
-                    center: [0.0, 0.0],
-                    radius: self.bore / 2.0,
-                }],
+                segments: vec![circle(self.bore)],
             });
         }
         SolidOp::Sweep {
@@ -109,25 +186,33 @@ impl Spacer {
                 wires,
             },
             kind: SweepKind::Extrude {
-                termination: ExtrudeTermination::Blind {
-                    distance: self.height,
-                },
+                termination: ExtrudeTermination::Blind { distance: height },
                 second_side: None,
                 symmetric: false,
                 reversed: false,
                 taper_deg: 0.0,
                 direction: None,
             },
-            op,
+            op: BooleanOp::NewSolid,
         }
     }
 
     fn label(&self) -> String {
-        let shape = match self.shape {
-            Shape::Round => "Ø",
-            Shape::Hex => "⬡",
-        };
-        format!("{shape}{} × {}", trim(self.outer), trim(self.height))
+        let (outer, height) = (trim(self.outer), trim(self.height));
+        match self.shape {
+            Shape::Round => format!("Ø{outer} × {height}"),
+            Shape::Hex => format!("⬡{outer} × {height}"),
+            Shape::Square => format!("□{outer} × {height}"),
+            Shape::Flanged => format!("Ø{outer}/{} × {height}", trim(self.flange)),
+        }
+    }
+}
+
+/// A circle about the origin, of diameter `d`.
+fn circle(d: f64) -> ProfileSegment {
+    ProfileSegment::Circle {
+        center: [0.0, 0.0],
+        radius: d / 2.0,
     }
 }
 
@@ -166,12 +251,18 @@ struct Spacers {
 
 impl Spacers {
     fn new_spacer(&self, shape: Shape) -> Spacer {
-        Spacer {
+        let mut spacer = Spacer {
             shape,
             outer: self.defaults.outer,
             bore: self.defaults.bore,
             height: self.defaults.height,
+            flange: 0.0,
+            flange_height: 0.0,
+        };
+        if shape == Shape::Flanged {
+            spacer.fit_flange();
         }
+        spacer
     }
 
     /// A body with the spacer on it: `(body, feature)`.
@@ -217,12 +308,12 @@ impl Bench for Spacers {
         };
         Registration {
             label: "Spacers".into(),
-            description: "Round and hex spacers and standoffs".into(),
+            description: "Round, hex, square and flanged spacers and standoffs".into(),
             icon: "spacer".into(),
-            tools: vec![
-                tool(ROUND, "Round spacer", "spacer", "R"),
-                tool(HEX, "Hex spacer", "spacer-hex", "H"),
-            ],
+            tools: SHAPES
+                .iter()
+                .map(|(_, name, icon, id, key)| tool(id, &format!("{name} spacer"), icon, key))
+                .collect(),
             commands: vec![Command {
                 id: MAKE.into(),
                 summary: "Make a spacer on a body of its own".into(),
@@ -231,13 +322,13 @@ impl Bench for Spacers {
                         "shape",
                         ParamKind::String,
                         false,
-                        "`round` (the default) or `hex`",
+                        "`round` (the default), `hex`, `square` or `flanged`",
                     ),
                     param(
                         "outer",
                         ParamKind::Number,
                         true,
-                        "diameter or across flats, mm",
+                        "diameter, across flats or side, mm",
                     ),
                     param(
                         "bore",
@@ -246,11 +337,25 @@ impl Bench for Spacers {
                         "hole diameter, mm; 0 for none",
                     ),
                     param("height", ParamKind::Number, true, "mm"),
+                    param(
+                        "flange",
+                        ParamKind::Number,
+                        false,
+                        "a flanged spacer's flange diameter, mm",
+                    ),
+                    param(
+                        "flange_height",
+                        ParamKind::Number,
+                        false,
+                        "a flanged spacer's flange thickness, mm",
+                    ),
                 ],
                 returns: "{body, feature}".into(),
                 read_only: false,
             }],
-            length_keys: vec!["outer".into(), "bore".into(), "height".into()],
+            length_keys: ["outer", "bore", "height", "flange", "flange_height"]
+                .map(String::from)
+                .to_vec(),
             ..Default::default()
         }
     }
@@ -258,10 +363,11 @@ impl Bench for Spacers {
     fn feature_info(&self, node: &Node) -> FeatureInfo {
         let spacer = Spacer::from(&node.data);
         FeatureInfo {
-            icon: match spacer.as_ref().map(|s| s.shape) {
-                Some(Shape::Hex) => "spacer-hex".into(),
-                _ => "spacer".into(),
-            },
+            icon: spacer
+                .as_ref()
+                .map_or(Shape::Round, |s| s.shape)
+                .icon()
+                .into(),
             kind_label: match spacer {
                 Some(s) => format!("Spacer {}", s.label()),
                 None => "Spacer".into(),
@@ -271,7 +377,7 @@ impl Bench for Spacers {
         }
     }
 
-    fn parameters(&self, _node: &Node) -> Vec<Parameter> {
+    fn parameters(&self, node: &Node) -> Vec<Parameter> {
         let length = |key: &str, label: &str| Parameter {
             key: format!("/{key}"),
             name: Some(key.into()),
@@ -281,11 +387,16 @@ impl Bench for Spacers {
             scale: 1.0,
             integer: false,
         };
-        vec![
+        let mut params = vec![
             length("outer", "Outside"),
             length("bore", "Bore"),
             length("height", "Height"),
-        ]
+        ];
+        if Spacer::from(&node.data).is_some_and(|s| s.shape == Shape::Flanged) {
+            params.push(length("flange", "Flange"));
+            params.push(length("flange_height", "Flange thickness"));
+        }
+        params
     }
 
     fn rebuild(&mut self, request: RebuildRequest) -> Vec<Rebuild> {
@@ -309,13 +420,10 @@ impl Bench for Spacers {
                     if let Some(problem) = spacer.problem() {
                         return fail(problem);
                     }
-                    let op = if ops.is_empty() {
-                        BooleanOp::NewSolid
-                    } else {
-                        BooleanOp::Fuse
-                    };
-                    ops.push(spacer.op(op));
-                    op_features.push(node.id.clone());
+                    for op in spacer.ops(ops.is_empty()) {
+                        ops.push(op);
+                        op_features.push(node.id.clone());
+                    }
                 }
                 Rebuild {
                     body: history.body,
@@ -336,16 +444,22 @@ impl Bench for Spacers {
         let number =
             |key: &str, default: f64| args.get(key).and_then(Value::as_f64).unwrap_or(default);
         let shape = match args.get("shape").and_then(Value::as_str) {
-            None | Some("round") => Shape::Round,
-            Some("hex") => Shape::Hex,
-            Some(other) => return Err(format!("`{other}` is not a shape: `round` or `hex`")),
+            None => Shape::Round,
+            Some(name) => Shape::named(name).ok_or_else(|| {
+                format!("`{name}` is not a shape: `round`, `hex`, `square` or `flanged`")
+            })?,
         };
-        let spacer = Spacer {
+        let mut spacer = Spacer {
             shape,
             outer: number("outer", self.defaults.outer),
             bore: number("bore", self.defaults.bore),
             height: number("height", self.defaults.height),
+            flange: number("flange", 0.0),
+            flange_height: number("flange_height", 0.0),
         };
+        if shape == Shape::Flanged {
+            spacer.fit_flange();
+        }
         if let Some(problem) = spacer.problem() {
             return Err(problem.into());
         }
@@ -356,10 +470,12 @@ impl Bench for Spacers {
     fn input(&mut self, input: &Input) -> bool {
         match &input.event {
             Event::ToolActivated => {
-                let shape = match input.tool.as_deref() {
-                    Some(ROUND) => Shape::Round,
-                    Some(HEX) => Shape::Hex,
-                    _ => return false,
+                let Some(shape) = SHAPES
+                    .iter()
+                    .find(|s| input.tool.as_deref() == Some(s.3))
+                    .map(|s| s.0)
+                else {
+                    return false;
                 };
                 match self.make(&self.new_spacer(shape)) {
                     Ok((body, feature)) => {
@@ -418,7 +534,7 @@ impl Bench for Spacers {
             mono: true,
         });
         frame.hud.tool = Some(ToolHint {
-            icon: "spacer".into(),
+            icon: spacer.shape.icon().into(),
             name: "Spacer".into(),
             prompt: "Set its size in the panel".into(),
             keys: vec![("Esc".into(), "cancel".into())],
@@ -426,7 +542,7 @@ impl Bench for Spacers {
         frame.editing = Some(id.clone());
         frame.task = Some(Task {
             title: "Spacer".into(),
-            icon: "spacer".into(),
+            icon: spacer.shape.icon().into(),
             confirmable: true,
         });
         let number = |key: &str, label: &str, value: f64| Widget::Number {
@@ -447,23 +563,31 @@ impl Bench for Spacers {
             Widget::Choice {
                 id: "shape".into(),
                 label: "Shape".into(),
-                options: vec!["Round".into(), "Hex".into()],
-                selected: match spacer.shape {
-                    Shape::Round => 0,
-                    Shape::Hex => 1,
-                },
+                options: SHAPES.iter().map(|s| s.1.to_string()).collect(),
+                selected: spacer.shape.index(),
             },
             number(
                 "outer",
                 match spacer.shape {
-                    Shape::Round => "Diameter",
+                    Shape::Round | Shape::Flanged => "Diameter",
                     Shape::Hex => "Across flats",
+                    Shape::Square => "Side",
                 },
                 spacer.outer,
             ),
             number("bore", "Bore", spacer.bore),
             number("height", "Height", spacer.height),
         ];
+        if spacer.shape == Shape::Flanged {
+            frame
+                .panel
+                .push(number("flange", "Flange diameter", spacer.flange));
+            frame.panel.push(number(
+                "flange_height",
+                "Flange thickness",
+                spacer.flange_height,
+            ));
+        }
         if let Some(problem) = spacer.problem() {
             frame.panel.push(Widget::Note {
                 kind: NoteKind::Error,
@@ -491,12 +615,17 @@ impl Bench for Spacers {
         };
         match event {
             PanelEvent::Choice { index, .. } => {
-                spacer.shape = if index == 1 { Shape::Hex } else { Shape::Round }
+                spacer.shape = SHAPES.get(index).map_or(Shape::Round, |s| s.0);
+                if spacer.shape == Shape::Flanged {
+                    spacer.fit_flange();
+                }
             }
             PanelEvent::Number { id: field, value } => match field.as_str() {
                 "outer" => spacer.outer = value,
                 "bore" => spacer.bore = value,
                 "height" => spacer.height = value,
+                "flange" => spacer.flange = value,
+                "flange_height" => spacer.flange_height = value,
                 _ => return,
             },
             _ => return,
@@ -588,12 +717,72 @@ mod tests {
     use super::*;
 
     fn spacer(shape: Shape) -> Spacer {
-        Spacer {
+        let mut spacer = Spacer {
             shape,
             outer: 8.0,
             bore: 3.4,
             height: 10.0,
+            flange: 0.0,
+            flange_height: 0.0,
+        };
+        if shape == Shape::Flanged {
+            spacer.fit_flange();
         }
+        spacer
+    }
+
+    #[test]
+    fn a_square_is_as_wide_as_its_side() {
+        let segments = spacer(Shape::Square).outline();
+        assert_eq!(segments.len(), 4);
+        for s in &segments {
+            let ProfileSegment::Line { start, end } = s else {
+                panic!("a square is lines");
+            };
+            assert!(
+                start
+                    .iter()
+                    .chain(end)
+                    .all(|v| (v.abs() - 4.0).abs() < 1e-12)
+            );
+        }
+    }
+
+    #[test]
+    fn a_flanged_spacer_builds_its_flange_then_its_body() {
+        let flanged = spacer(Shape::Flanged);
+        assert_eq!(flanged.problem(), None);
+        assert_eq!((flanged.flange, flanged.flange_height), (12.0, 2.0));
+        let ops = flanged.ops(true);
+        assert_eq!(ops.len(), 2);
+        let roles: Vec<_> = ops.iter().map(|op| op.boolean_op()).collect();
+        assert_eq!(roles, [Some(BooleanOp::NewSolid), Some(BooleanOp::Fuse)]);
+        assert!(
+            Spacer {
+                flange: 7.0,
+                ..flanged.clone()
+            }
+            .problem()
+            .is_some(),
+            "narrower than the spacer"
+        );
+        assert!(
+            Spacer {
+                flange_height: 10.0,
+                ..flanged
+            }
+            .problem()
+            .is_some(),
+            "as tall as the spacer"
+        );
+    }
+
+    #[test]
+    fn a_spacer_saved_before_flanges_reads_with_none() {
+        let old = json!({"shape": "hex", "outer": 8.0, "bore": 3.4, "height": 10.0});
+        let read = Spacer::from(&old).expect("reads");
+        assert_eq!((read.flange, read.flange_height), (0.0, 0.0));
+        assert_eq!(read.problem(), None);
     }
 
     #[test]

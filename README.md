@@ -1,13 +1,17 @@
 # Spacers: an example printCAD workbench
 
 A workbench package for [printCAD](https://github.com/gilbertorconde/printCAD)
-that makes round and hex spacers, and a starting point for your own. It
+that makes round, hex, square and flanged spacers, and a starting point
+for your own. It
 shows the parts most workbenches need:
 
-- two tools (Round spacer `R`, Hex spacer `H`) that make a feature on a body
-  of its own and open its task panel;
+- a tool per shape (Round `R`, Hex `H`, Square `S`, Flanged `F`) that makes
+  a feature on a body of its own and opens its task panel;
 - a feature kind whose numbers take formulas anywhere printCAD shows them;
-- a rebuild plan the kernel runs to make the solid;
+- a rebuild plan the kernel runs to make the solid (a flanged spacer is two
+  extrusions fused);
+- data that reads across versions: spacers saved with 0.1.0 open in 0.2.0,
+  whose flange fields default to none;
 - the spacer's axis and size drawn in the view while it is edited;
 - a command for scripts and AI agents: `pc.example.spacers.make{outer = 8, height = 10}`;
 - an "Edit spacer" entry on the tree's menu, and a settings page for the

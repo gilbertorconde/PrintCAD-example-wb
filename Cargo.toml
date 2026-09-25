@@ -1,9 +1,9 @@
 [package]
 name = "spacers"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
-description = "An example printCAD workbench package: round and hex spacers"
+description = "An example printCAD workbench package: spacers and standoffs"
 publish = false
 
 [lib]

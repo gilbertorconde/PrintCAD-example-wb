@@ -1,8 +1,8 @@
 id = "example.spacers"
 name = "Spacers"
-version = "0.1.0"
+version = "0.2.0"
 api = "printcad:workbench@0.1"
-description = "Round and hex spacers and standoffs for printing"
+description = "Round, hex, square and flanged spacers and standoffs for printing"
 feature_kinds = ["example.spacers.spacer"]
 memory_mb = 128
 
