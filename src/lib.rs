@@ -169,11 +169,9 @@ impl Spacer {
 
     /// `outline` with the bore through it, extruded `height` up.
     fn prism(&self, outline: Vec<ProfileSegment>, height: f64) -> SolidOp {
-        let mut wires = vec![ProfileWire { segments: outline }];
+        let mut wires = vec![ProfileWire::new(outline)];
         if self.bore > 0.0 {
-            wires.push(ProfileWire {
-                segments: vec![circle(self.bore)],
-            });
+            wires.push(ProfileWire::new(vec![circle(self.bore)]));
         }
         SolidOp::Sweep {
             profile: Profile {
