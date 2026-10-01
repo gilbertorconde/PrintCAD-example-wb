@@ -487,6 +487,11 @@ impl Bench for Spacers {
                 }
                 true
             }
+            // A double click on a spacer's tree row opens it.
+            Event::EditFeature { feature } => {
+                self.open(feature, false);
+                self.editing.is_some()
+            }
             Event::Key { key, down: true } if key == "Escape" && self.editing.is_some() => {
                 self.task_close(false);
                 true
@@ -639,7 +644,13 @@ impl Bench for Spacers {
             return Some("Edit spacer".into());
         }
         let undone = if self.fresh {
-            host::remove_feature(&id)
+            // The tool made a body for it too; it goes with the spacer, the
+            // feature first so the empty body's removal undoes.
+            let body = host::feature(&id).and_then(|n| n.body);
+            host::remove_feature(&id).and_then(|()| match body {
+                Some(body) => host::remove_body(&body),
+                None => Ok(()),
+            })
         } else {
             host::set_feature_data(&id, opened.to_value())
         };
