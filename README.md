@@ -62,8 +62,9 @@ workflow: format, clippy, tests, and the package as a build artifact.
 4. Icons are 24×24 SVGs in `icons/`, drawn in white with a 1.5 px stroke;
    name them by file name.
 
-The SDK comes from the printCAD repository (`sdk/printcad-bench-sdk`). Its
-guide is [docs/PLUGINS.md](https://github.com/gilbertorconde/printCAD/blob/master/docs/PLUGINS.md).
+The SDK is [`printcad-bench-sdk`](https://crates.io/crates/printcad-bench-sdk)
+on crates.io, `0.1` for the `printcad:workbench@0.1` contract. Its guide is
+[docs/PLUGINS.md](https://github.com/gilbertorconde/printCAD/blob/master/docs/PLUGINS.md).
 
 ## Layout
 

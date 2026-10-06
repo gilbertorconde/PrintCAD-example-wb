@@ -10,7 +10,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-printcad-bench-sdk = { git = "https://github.com/gilbertorconde/printCAD", tag = "v0.6.0" }
+printcad-bench-sdk = "0.1"
 serde = { version = "1", features = ["derive"] }
 
 [profile.release]
