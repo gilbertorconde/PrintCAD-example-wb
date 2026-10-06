@@ -350,6 +350,7 @@ impl Bench for Spacers {
                 ],
                 returns: "{body, feature}".into(),
                 read_only: false,
+                ..Default::default()
             }],
             length_keys: ["outer", "bore", "height", "flange", "flange_height"]
                 .map(String::from)
