@@ -6,6 +6,11 @@
 //! formulas, a rebuild plan the kernel runs, drawing in the view, a command
 //! for scripts and agents, a tree menu entry and a settings page.
 
+// Every literal of the contract's structs ends in `..Default::default()`,
+// even one naming every field, so a field a later 0.1.x adds leaves the
+// package building.
+#![allow(clippy::needless_update)]
+
 use printcad_bench_sdk::api::kernel_api::{
     BooleanOp, ExtrudeTermination, Profile, ProfilePlane, ProfileSegment, ProfileWire, SweepKind,
 };
@@ -303,6 +308,7 @@ impl Bench for Spacers {
             kind,
             required,
             doc: doc.into(),
+            ..Default::default()
         };
         Registration {
             label: "Spacers".into(),
@@ -373,6 +379,7 @@ impl Bench for Spacers {
             },
             family_label: "Spacer".into(),
             builds_solid: true,
+            ..Default::default()
         }
     }
 
@@ -385,6 +392,7 @@ impl Bench for Spacers {
             pointer: format!("/{key}"),
             scale: 1.0,
             integer: false,
+            ..Default::default()
         };
         let mut params = vec![
             length("outer", "Outside"),
@@ -412,6 +420,7 @@ impl Bench for Spacers {
                             feature: Some(node.id.clone()),
                             message: message.into(),
                         },
+                        ..Default::default()
                     };
                     let Some(spacer) = Spacer::from(&node.data) else {
                         return fail("The spacer's data does not read.");
@@ -431,6 +440,7 @@ impl Bench for Spacers {
                     } else {
                         Plan::Ops { ops, op_features }
                     },
+                    ..Default::default()
                 }
             })
             .collect()
@@ -528,6 +538,7 @@ impl Bench for Spacers {
             width: 1.5,
             dashed: true,
             closed: false,
+            ..Default::default()
         });
         frame.labels.push(Label {
             at: world(spacer.height + 3.0),
@@ -536,18 +547,21 @@ impl Bench for Spacers {
             size: 12.0,
             pill: true,
             mono: true,
+            ..Default::default()
         });
         frame.hud.tool = Some(ToolHint {
             icon: spacer.shape.icon().into(),
             name: "Spacer".into(),
             prompt: "Set its size in the panel".into(),
             keys: vec![("Esc".into(), "cancel".into())],
+            ..Default::default()
         });
         frame.editing = Some(id.clone());
         frame.task = Some(Task {
             title: "Spacer".into(),
             icon: spacer.shape.icon().into(),
             confirmable: true,
+            ..Default::default()
         });
         let number = |key: &str, label: &str, value: f64| Widget::Number {
             id: key.into(),
@@ -671,6 +685,7 @@ impl Bench for Spacers {
                     hint: None,
                     enabled: true,
                     separator_before: false,
+                    ..Default::default()
                 }]
             }
             _ => Vec::new(),
